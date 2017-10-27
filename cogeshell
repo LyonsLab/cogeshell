@@ -1,0 +1,201 @@
+#!/usr/local/bin/python3
+import cmd, configparser, getpass, json, MySQLdb, os, sys, urllib.request
+
+class CoGeShell(cmd.Cmd):
+	auth = None
+	base_url = 'https://genomevolution.org/coge/api/v1/'
+	db = None
+	file = None
+	intro = 'Welcome to the CoGe shell.   Type help or ? to list commands, ^D to exit.\n'
+	password = None
+	prompt = '(CoGe) '
+	token = None
+	username = None
+
+	genome_id = None
+	experiment_id = None
+	notebook_id = None
+
+	def __init__(self, config):
+		cmd.Cmd.__init__(self)
+		self.config = config
+		if config['coge'] and config['coge']['auth']:
+			self.auth = config['coge']['auth']
+		if config['options'] and config['options']['url']:
+			self.base_url = config['options']['url']
+		if config['user']:
+			self.username = config['user']['username']
+			self.password = config['user']['password']
+
+	def add_experiment(self, e, genome_id, data_source_id, creator_id, notebook_id = None):
+		c = self.connect()
+		c.execute("""INSERT INTO experiment(genome_id,data_source_id,data_type,name,description,version,storage_path,restricted,row_count,creator_id) 
+                     VALUES(%s,%s,2,%s,%s,%s,%s,%s,%s,%s)""",
+			(genome_id, data_source_id, e['name'], e['description'], e['version'], '', e['restricted'], e['num_items'], creator_id))
+		self.db.commit()
+		experiment_id = c.lastrowid
+		c.execute("INSERT INTO user_connector(parent_id,parent_type,child_id,child_type,role_id) VALUES(%s,5,%s,3,2)", (creator_id, experiment_id))
+		self.db.commit()
+		metadata = e['additional_metadata']
+		if metadata:
+			for md in metadata:
+				c.execute("INSERT INTO experiment_annotation(experiment_id,annotation_type_id,annotation,link) VALUES(%s,10979,%s,%s)", (experiment_id, md['text'], md['link'])) # 10979 = "note" on production
+				self.db.commit()
+		if notebook_id:
+			c.execute('INSERT INTO list_connector(parent_id,child_id,child_type) VALUES(' + notebook_id + ',' + experiment_id + ',2')
+			self.db.commit()
+		return experiment_id
+
+	def build_url(self, url):
+		url = self.base_url + url
+		if self.token:
+			url += '?username=' + self.username + '&token=' + self.token
+		return url
+
+	def calc_dir_size(self, path):
+		total = 0
+		for entry in os.scandir(path):
+			if entry.is_dir():
+				total += self.calc_dir_size(entry.path)
+			else:
+				total += entry.stat().st_size
+		return total
+
+	def connect(self):
+		if not self.db:
+			cfg = self.config['db']
+			self.db = MySQLdb.connect(db=cfg['db'], port=cfg.getint('port'), user=cfg['username'], passwd=cfg['password'])
+		return self.db.cursor()
+
+	def do_add_experiment(self, arg):
+		experiment_id = self.add_experiment(self.results, 31614, 2483, 1578) # 31614:geco, 2483 = TERRA-REF on geco, geco, 2472 = pozersky on geco, 1578 = sdavey on geco
+		print(experiment_id)
+
+	def do_calc_experiments_size(self, arg):
+		self.do_fetch_notebook_items(arg)
+		size = 0
+		for experiment_id in self.experiment_ids:
+			size += self.calc_dir_size(self.experiment_dir(experiment_id))
+		print(self.size(size))
+
+	def do_EOF(self, line):
+		return True
+
+	def do_exit(self, arg):
+		'Exit cogeshell.'
+		return True
+
+	def do_fetch_experiment(self, arg):
+		if not arg:
+			arg = self.get_id('experiment')
+		self.get('experiments/' + arg)
+
+	def do_fetch_genome(self, arg):
+		if not arg:
+			arg = self.get_id('genome')
+		self.get('genomes/' + arg)
+
+	def do_fetch_notebook(self, arg):
+		if not arg:
+			arg = self.get_id('notebook')
+		self.get('notebooks/' + arg)
+
+	def do_fetch_notebook_items(self, arg):
+		notebook_id = self.get_id('notebook')
+		self.get('notebooks/' + notebook_id)
+		items = self.results['items']
+		if arg:
+			items = [i for i in items if i['data_type'] == arg]
+		items = [i['id'] for i in items]
+		self.experiment_ids = items
+		print(json.dumps(items, indent=4, sort_keys=True))
+
+	def do_get_workflow_ids(self, arg):
+		self.do_fetch_notebook_items(arg)
+		e = []
+		for experiment_id in self.experiment_ids:
+			with open(self.experiment_dir(experiment_id) + '/metadata.json', 'r') as f:
+				metadata = json.loads(f.read())
+			e.append((int(experiment_id), metadata['workflow_id']))
+		print(json.dumps(e, indent=4, sort_keys=True))
+
+	def do_show_token(self, arg):
+		print(self.token)
+
+	def do_transfer_experiment(self, arg):
+		e = arg
+		self.do_fetch_experiment(e)
+		old_id = self.results['id']
+		new_id = self.add_experiment(self.results, 31614, 2483, 1578) # 36016:prod, 2747 = TERRA-REF on prod, 2625 = pozersky on prod
+		new_dir = self.experiment_dir(new_id)
+		os.makedirs(new_dir, 0o755, True)
+		os.system('cp ' + self.experiment_dir(old_id) + '/* ' + new_dir)
+		os.system('chown -R www-data ' + new_dir)
+		os.system('chgrp -R www-data ' + new_dir)
+
+	def emptyline(self):
+		pass
+
+	def experiment_dir(self, experiment_id, geco = False):
+		return ('/mnt/nfs/exp/0/0/' if geco else '/storage/coge/data/experiments/0/0/') + str(experiment_id // 1000) + '/' + str(experiment_id)
+
+	def get(self, url):
+		try:
+			x = urllib.request.urlopen(self.build_url(url))
+		except urllib.error.HTTPError:
+			self.token = self.get_token()
+			try:
+				x = urllib.request.urlopen(self.build_url(url))
+			except urllib.error.HTTPError as e:
+				print(e)
+				return
+		self.results = json.loads(x.read().decode('utf8'))
+		print(self.base_url + url)
+		print(json.dumps(self.results, indent=4, sort_keys=True))
+
+	def get_id(self, name):
+		print(name + ' id', end='')
+		prev_id = getattr(self, name + '_id')
+		if prev_id:
+			print(' (' + prev_id + ')', end='')
+		print(': ', end='')
+		id = None
+		while not id:
+			id = input()
+			if not id:
+				id = prev_id
+		setattr(self, name + '_id', id)
+		return id
+
+	def get_token(self):
+		if not self.username:
+			print('username: ', end='')
+			self.username = input()
+		if not self.password:
+			self.password = getpass.getpass('password: ')
+		headers = {}
+		headers['Authorization'] = 'Basic ' + self.auth
+		data = 'grant_type=password&scope=PRODUCTION&username=' + self.username + '&password=' + self.password
+		req = urllib.request.Request('https://agave.iplantc.org/token', data = data.encode(), headers = headers)
+		res = json.load(urllib.request.urlopen(req))
+		return res['access_token']
+
+	def size(self, bytes):
+		sizes = [
+			(1024 ** 5, 'P'),
+			(1024 ** 4, 'T'), 
+			(1024 ** 3, 'G'), 
+			(1024 ** 2, 'M'), 
+			(1024 ** 1, 'K'),
+			(1024 ** 0, 'B'),
+			]
+		for factor, suffix in sizes:
+			if bytes >= factor:
+				break
+		amount = round(bytes/factor, 2)
+		return str(amount) + suffix
+
+if __name__ == '__main__':
+	config = configparser.ConfigParser()
+	config.read('cogeshell.cfg')
+	CoGeShell(config).cmdloop()
