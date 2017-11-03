@@ -114,11 +114,23 @@ class CoGeShell(cmd.Cmd):
 		self.do_fetch_notebook_items(arg)
 		e = []
 		for experiment_id in self.experiment_ids:
-			with open(self.experiment_dir(experiment_id) + '/metadata.json', 'r') as f:
+			with open(self.experiment_dir(int(experiment_id)) + '/metadata.json', 'r') as f:
 				metadata = json.loads(f.read())
 			e.append((int(experiment_id), metadata['workflow_id']))
 		print(json.dumps(e, indent=4, sort_keys=True))
 
+	def do_purge_experiment(self, arg):
+		if not arg:
+			arg = self.get_id('experiment')
+		c = self.connect()
+		self.purge_experiment(arg, c)
+
+	def do_purge_experiments(self, arg):
+		self.do_fetch_notebook_items(arg)
+		c = self.connect()
+		for experiment_id in self.experiment_ids:
+			self.purge_experiment(experiment_id, c)
+			
 	def do_show_token(self, arg):
 		print(self.token)
 
@@ -179,6 +191,16 @@ class CoGeShell(cmd.Cmd):
 		req = urllib.request.Request('https://agave.iplantc.org/token', data = data.encode(), headers = headers)
 		res = json.load(urllib.request.urlopen(req))
 		return res['access_token']
+
+	def purge_experiment(self, experiment_id, c):
+		print('purging experiment ' + experiment_id)
+		c.execute('DELETE FROM experiment WHERE experiment_id=' + experiment_id)
+		c.execute('DELETE FROM experiment_annotation WHERE experiment_id=' + experiment_id)
+		c.execute('DELETE FROM experiment_type_connector WHERE experiment_id=' + experiment_id)
+		c.execute('DELETE FROM user_connector WHERE child_type=3 AND child_id=' + experiment_id)
+		c.execute('DELETE FROM list_connector WHERE child_type=3 AND child_id=' + experiment_id)
+		self.db.commit()
+		os.system('rm -rf ' + self.experiment_dir(int(experiment_id)))
 
 	def size(self, bytes):
 		sizes = [
