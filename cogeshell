@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3
+#!/usr/bin/python3
 import cmd, configparser, getpass, json, MySQLdb, os, sys, urllib.request
 
 class CoGeShell(cmd.Cmd):
@@ -189,7 +189,8 @@ class CoGeShell(cmd.Cmd):
 		headers['Authorization'] = 'Basic ' + self.auth
 		data = 'grant_type=password&scope=PRODUCTION&username=' + self.username + '&password=' + self.password
 		req = urllib.request.Request('https://agave.iplantc.org/token', data = data.encode(), headers = headers)
-		res = json.load(urllib.request.urlopen(req))
+		x = urllib.request.urlopen(req)
+		res = json.loads(x.read().decode('utf8'))
 		return res['access_token']
 
 	def purge_experiment(self, experiment_id, c):
