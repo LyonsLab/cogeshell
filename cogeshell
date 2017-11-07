@@ -69,6 +69,7 @@ class CoGeShell(cmd.Cmd):
 
 	def copy_experiment(self):
 		experiment_id = self.add_experiment(self.results, 36016, 2747, 2625, 2137) # 36016:prod, 31614:geco, 2747=TERRA-REF on prod, 2483=TERRA-REF on geco, geco, 2625=pozersky on prod, 2472=pozersky on geco, 1578=sdavey on geco, 2137=prod notebook
+		os.system('ln -s /mnt/nfs/geco/experiments/0/0/9/' + str(self.results['id']) + ' /storage/coge/data/experiments/0/0/11/' + str(experiment_id))
 #		new_dir = self.experiment_dir(experiment_id)
 #		os.system('mkdir ' + new_dir)
 #		os.system('scp -P 1657 -i /home/sdavey/.ssh/id_rsa sdavey@geco.iplantcollaborative.org:' + self.experiment_dir(int(self.experiment_id)) + '/* ' + new_dir)
