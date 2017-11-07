@@ -68,7 +68,12 @@ class CoGeShell(cmd.Cmd):
 		return self.db.cursor()
 
 	def do_add_experiment(self, arg):
-		experiment_id = self.add_experiment(self.results, 31614, 2483, 1578) # 31614:geco, 2483 = TERRA-REF on geco, geco, 2472 = pozersky on geco, 1578 = sdavey on geco
+		experiment_id = self.add_experiment(self.results, 36016, 2137, 2625) # 36016:prod, 31614:geco, 2137=TERRA-REF SNPS on prod, 2483=TERRA-REF on geco, geco, 2625=pozersky on prod, 2472=pozersky on geco, 1578=sdavey on geco
+		new_dir = self.experiment_dir(experiment_id)
+		os.system('mkdir ' + new_dir)
+		os.system('scp -P 1657 -i /home/sdavey/.ssh/id_rsa sdavey@geco.iplantcollaborative.org:' + self.experiment_dir(int(self.experiment_id)) + '/* ' + new_dir)
+		os.system('chown -R www-data ' + new_dir)
+		os.system('chgrp -R www-data ' + new_dir)
 		print(experiment_id)
 
 	def do_calc_experiments_size(self, arg):
@@ -148,8 +153,8 @@ class CoGeShell(cmd.Cmd):
 	def emptyline(self):
 		pass
 
-	def experiment_dir(self, experiment_id, geco = False):
-		return ('/mnt/nfs/exp/0/0/' if geco else '/storage/coge/data/experiments/0/0/') + str(experiment_id // 1000) + '/' + str(experiment_id)
+	def experiment_dir(self, experiment_id):
+		return '/storage/coge/data/experiments/0/0/' + str(experiment_id // 1000) + '/' + str(experiment_id)
 
 	def get(self, url):
 		try:
