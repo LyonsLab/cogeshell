@@ -27,7 +27,7 @@ class CoGeShell(cmd.Cmd):
 			self.username = config['user']['username']
 			self.password = config['user']['password']
 
-	def add_experiment(self, e, genome_id, data_source_id, creator_id, notebook_id = None):
+	def add_experiment(self, e, genome_id, data_source_id, creator_id, notebook_id=None):
 		c = self.connect()
 		c.execute("""INSERT INTO experiment(genome_id,data_source_id,data_type,name,description,version,storage_path,restricted,row_count,creator_id) 
                      VALUES(%s,%s,2,%s,%s,%s,%s,%s,%s,%s)""",
@@ -42,7 +42,7 @@ class CoGeShell(cmd.Cmd):
 				c.execute("INSERT INTO experiment_annotation(experiment_id,annotation_type_id,annotation,link) VALUES(%s,10979,%s,%s)", (experiment_id, md['text'], md['link'])) # 10979 = "note" on production
 				self.db.commit()
 		if notebook_id:
-			c.execute('INSERT INTO list_connector(parent_id,child_id,child_type) VALUES(' + notebook_id + ',' + experiment_id + ',2')
+			c.execute('INSERT INTO list_connector(parent_id,child_id,child_type) VALUES(' + str(notebook_id) + ',' + str(experiment_id) + ',2)')
 			self.db.commit()
 		return experiment_id
 
@@ -67,8 +67,8 @@ class CoGeShell(cmd.Cmd):
 			self.db = MySQLdb.connect(db=cfg['db'], port=cfg.getint('port'), user=cfg['username'], passwd=cfg['password'])
 		return self.db.cursor()
 
-	def do_add_experiment(self, arg):
-		experiment_id = self.add_experiment(self.results, 36016, 2137, 2625) # 36016:prod, 31614:geco, 2137=TERRA-REF SNPS on prod, 2483=TERRA-REF on geco, geco, 2625=pozersky on prod, 2472=pozersky on geco, 1578=sdavey on geco
+	def copy_experiment(self):
+		experiment_id = self.add_experiment(self.results, 36016, 2747, 2625, 2137) # 36016:prod, 31614:geco, 2747=TERRA-REF on prod, 2483=TERRA-REF on geco, geco, 2625=pozersky on prod, 2472=pozersky on geco, 1578=sdavey on geco, 2137=prod notebook
 		new_dir = self.experiment_dir(experiment_id)
 		os.system('mkdir ' + new_dir)
 		os.system('scp -P 1657 -i /home/sdavey/.ssh/id_rsa sdavey@geco.iplantcollaborative.org:' + self.experiment_dir(int(self.experiment_id)) + '/* ' + new_dir)
@@ -76,12 +76,19 @@ class CoGeShell(cmd.Cmd):
 		os.system('chgrp -R www-data ' + new_dir)
 		print(experiment_id)
 
-	def do_calc_experiments_size(self, arg):
+	def do_calc_notebook_size(self, arg):
 		self.do_fetch_notebook_items(arg)
 		size = 0
 		for experiment_id in self.experiment_ids:
 			size += self.calc_dir_size(self.experiment_dir(experiment_id))
 		print(self.size(size))
+
+	def do_copy_notebook_experiments(self, arg):
+		self.do_fetch_notebook_items(arg)
+		c = self.connect()
+		for experiment_id in self.experiment_ids:
+			self.do_fetch_experiment(experiment_id)
+			self.copy_experiment()
 
 	def do_EOF(self, line):
 		return True
@@ -138,17 +145,6 @@ class CoGeShell(cmd.Cmd):
 			
 	def do_show_token(self, arg):
 		print(self.token)
-
-	def do_transfer_experiment(self, arg):
-		e = arg
-		self.do_fetch_experiment(e)
-		old_id = self.results['id']
-		new_id = self.add_experiment(self.results, 31614, 2483, 1578) # 36016:prod, 2747 = TERRA-REF on prod, 2625 = pozersky on prod
-		new_dir = self.experiment_dir(new_id)
-		os.makedirs(new_dir, 0o755, True)
-		os.system('cp ' + self.experiment_dir(old_id) + '/* ' + new_dir)
-		os.system('chown -R www-data ' + new_dir)
-		os.system('chgrp -R www-data ' + new_dir)
 
 	def emptyline(self):
 		pass
